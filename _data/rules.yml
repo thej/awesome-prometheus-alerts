@@ -12,7 +12,8 @@ groups:
     services:
       - name: Prometheus self-monitoring
         exporters:
-          - rules:
+          - slug: embedded-exporter
+            rules:
             - name: Prometheus job missing
               description: A Prometheus job has disappeared
               query: 'absent(up{job="prometheus"})'
@@ -23,7 +24,7 @@ groups:
               severity: critical
             - name: Prometheus all targets missing
               description: A Prometheus job does not have living target anymore.
-              query: 'count by (job) (up) == 0'
+              query: 'sum by (job) (up) == 0'
               severity: critical
             - name: Prometheus configuration reload failure
               description: Prometheus configuration reload error
@@ -79,8 +80,8 @@ groups:
               query: 'prometheus_sd_discovered_targets == 0'
               severity: critical
             - name: Prometheus target scraping slow
-              description: Prometheus is scraping exporters slowly
-              query: 'prometheus_target_interval_length_seconds{quantile="0.9"} > 60'
+              description: Prometheus is scraping exporters slowly since it exceeded the requested interval time. Your Prometheus server is under-provisioned.
+              query: 'prometheus_target_interval_length_seconds{quantile="0.9"} / on (interval, instance, job) prometheus_target_interval_length_seconds{quantile="0.5"} > 1.05'
               severity: warning
               for: 5m
             - name: Prometheus large scrape
@@ -124,6 +125,7 @@ groups:
       - name: Host and hardware
         exporters:
           - name: node-exporter
+            slug: node-exporter
             doc_url: https://github.com/prometheus/node_exporter
             rules:
               - name: Host out of memory
@@ -202,6 +204,10 @@ groups:
                 description: CPU steal is > 10%. A noisy neighbor is killing VM performances or a spot instance may be out of credit.
                 query: 'avg by(instance) (rate(node_cpu_seconds_total{mode="steal"}[5m])) * 100 > 10'
                 severity: warning
+              - name: Host CPU high iowait
+                description: CPU iowait > 5%. A high iowait means that you are disk or network bound.
+                query: 'avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) * 100 > 5'
+                severity: warning
               - name: Host context switching
                 description: Context switching is growing on node (> 1000 / s)
                 query: '(rate(node_context_switches_total[5m])) / (count without(cpu, mode) (node_cpu_seconds_total{mode="idle"})) > 1000'
@@ -266,7 +272,7 @@ groups:
                 for: 2m
               - name: Host Network Interface Saturated
                 description: 'The network interface "{{ $labels.device }}" on "{{ $labels.instance }}" is getting overloaded.'
-                query: '(rate(node_network_receive_bytes_total{device!~"^tap.*"}[1m]) + rate(node_network_transmit_bytes_total{device!~"^tap.*"}[1m])) / node_network_speed_bytes{device!~"^tap.*"} > 0.8 < 10000'    # < to 10Gb to prevent +inf when max speed is unknown
+                query: '(rate(node_network_receive_bytes_total{device!~"^tap.*|^vnet.*|^veth.*|^tun.*"}[1m]) + rate(node_network_transmit_bytes_total{device!~"^tap.*|^vnet.*|^veth.*|^tun.*"}[1m])) / node_network_speed_bytes{device!~"^tap.*|^vnet.*|^veth.*|^tun.*"} > 0.8 < 10000'    # < to 10Gb to prevent +inf when max speed is unknown
                 severity: warning
                 for: 1m
               - name: Host Network Bond Degraded
@@ -299,6 +305,7 @@ groups:
       - name: Docker containers
         exporters:
           - name: google/cAdvisor
+            slug: google-cadvisor
             doc_url: https://github.com/google/cadvisor
             rules:
               - name: Container killed
@@ -330,11 +337,6 @@ groups:
                 query: '(1 - (sum(container_fs_inodes_free{name!=""}) BY (instance) / sum(container_fs_inodes_total) BY (instance))) * 100 > 80'
                 severity: warning
                 for: 2m
-              - name: Container Volume IO usage
-                description: Container Volume IO usage is above 80%
-                query: '(sum(container_fs_io_current{name!=""}) BY (instance, name) * 100) > 80'
-                severity: warning
-                for: 2m
               - name: Container high throttle rate
                 description: Container is being throttled
                 query: 'rate(container_cpu_cfs_throttled_seconds_total[3m]) > 1'
@@ -344,12 +346,17 @@ groups:
       - name: Blackbox
         exporters:
           - name: prometheus/blackbox_exporter
+            slug: blackbox-exporter
             doc_url: https://github.com/prometheus/blackbox_exporter
             rules:
               - name: Blackbox probe failed
                 description: Probe failed
                 query: probe_success == 0
                 severity: critical
+              - name: Blackbox configuration reload failure
+                description: Blackbox configuration reload failure
+                query: 'blackbox_exporter_config_last_reload_successful != 1'
+                severity: warning
               - name: Blackbox slow probe
                 description: Blackbox probe took more than 1s to complete
                 query: 'avg_over_time(probe_duration_seconds[1m]) > 1'
@@ -385,6 +392,7 @@ groups:
       - name: Windows Server
         exporters:
           - name: prometheus-community/windows_exporter
+            slug: windows-exporter
             doc_url: https://github.com/prometheus-community/windows_exporter
             rules:
               - name: Windows Server collector Error
@@ -414,6 +422,7 @@ groups:
       - name: VMware
         exporters:
           - name: pryorda/vmware_exporter
+            slug: pryorda-vmware-exporter
             doc_url: https://github.com/pryorda/vmware_exporter
             rules:
               - name: Virtual Machine Memory Warning
@@ -440,6 +449,7 @@ groups:
       - name: Netdata
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             doc_url: https://github.com/netdata/netdata/blob/master/backends/prometheus/README.md
             rules:
               - name: Netdata high cpu usage
@@ -490,6 +500,7 @@ groups:
       - name: MySQL
         exporters:
           - name: prometheus/mysqld_exporter
+            slug: mysqld-exporter
             doc_url: https://github.com/prometheus/mysqld_exporter
             rules:
               - name: MySQL down
@@ -535,8 +546,9 @@ groups:
 
       - name: PostgreSQL
         exporters:
-          - name: wrouesnel/postgres_exporter
-            doc_url: https://github.com/wrouesnel/postgres_exporter/
+          - name: prometheus-community/postgres_exporter
+            slug: postgres-exporter
+            doc_url: https://github.com/prometheus-community/postgres_exporter
             rules:
               - name: Postgresql down
                 description: Postgresql instance is down
@@ -554,13 +566,13 @@ groups:
                 description: PostgreSQL replication lag is going up (> 30s)
                 query: 'pg_replication_lag > 30 and ON(instance) pg_replication_is_replica == 1'
                 severity: critical
-              - name: Postgresql table not vacuumed
-                description: Table has not been vacuumed for 24 hours
-                query: 'time() - pg_stat_user_tables_last_autovacuum > 60 * 60 * 24'
+              - name: Postgresql table not auto vacuumed
+                description: Table {{ $labels.relname }} has not been auto vacuumed for 10 days
+                query: '(pg_stat_user_tables_last_autovacuum > 0) and (time() - pg_stat_user_tables_last_autovacuum) > 60 * 60 * 24 * 10'
                 severity: warning
-              - name: Postgresql table not analyzed
-                description: Table has not been analyzed for 24 hours
-                query: 'time() - pg_stat_user_tables_last_autoanalyze > 60 * 60 * 24'
+              - name: Postgresql table not auto analyzed
+                description: Table {{ $labels.relname }} has not been auto analyzed for 10 days
+                query: '(pg_stat_user_tables_last_autoanalyze > 0) and (time() - pg_stat_user_tables_last_autoanalyze) > 24 * 60 * 60 * 10'
                 severity: warning
               - name: Postgresql too many connections
                 description: PostgreSQL instance has too many connections (> 80%).
@@ -576,17 +588,12 @@ groups:
                 description: PostgreSQL has dead-locks
                 query: 'increase(pg_stat_database_deadlocks{datname!~"template.*|postgres"}[1m]) > 5'
                 severity: warning
-              - name: Postgresql slow queries
-                description: PostgreSQL executes slow queries
-                query: 'pg_slow_queries > 0'
-                severity: warning
-                for: 2m
               - name: Postgresql high rollback rate
                 description: Ratio of transactions being aborted compared to committed is > 2 %
                 query: 'rate(pg_stat_database_xact_rollback{datname!~"template.*"}[3m]) / rate(pg_stat_database_xact_commit{datname!~"template.*"}[3m]) > 0.02'
                 severity: warning
               - name: Postgresql commit rate low
-                description: Postgres seems to be processing very few transactions
+                description: Postgresql seems to be processing very few transactions
                 query: 'rate(pg_stat_database_xact_commit[1m]) < 10'
                 severity: critical
                 for: 2m
@@ -595,15 +602,6 @@ groups:
                 query: 'rate(pg_txid_current[1m]) < 5'
                 severity: warning
                 for: 2m
-              - name: Postgresqllow XLOG consumption
-                description: Postgres seems to be consuming XLOG very slowly
-                query: 'rate(pg_xlog_position_bytes[1m]) < 100'
-                severity: warning
-                for: 2m
-              - name: Postgresql WALE replication stopped
-                description: WAL-E replication seems to be stopped
-                query: 'rate(pg_xlog_position_bytes[1m]) == 0'
-                severity: critical
               - name: Postgresql high rate statement timeout
                 description: Postgres transactions showing high rate of statement timeouts
                 query: 'rate(postgresql_errors_total{type="statement_timeout"}[1m]) > 3'
@@ -611,10 +609,6 @@ groups:
               - name: Postgresql high rate deadlock
                 description: Postgres detected deadlocks
                 query: 'increase(postgresql_errors_total{type="deadlock_detected"}[1m]) > 1'
-                severity: critical
-              - name: Postgresql replication lag bytes
-                description: Postgres Replication lag (in bytes) is high
-                query: '(pg_xlog_position_bytes and pg_replication_is_replica == 0) - on(environment) group_right(instance) (pg_xlog_position_bytes and pg_replication_is_replica == 1) > 1e+09'
                 severity: critical
               - name: Postgresql unused replication slot
                 description: Unused Replication Slots
@@ -637,7 +631,7 @@ groups:
               - name: Postgresql configuration changed
                 description: Postgres Database configuration change has occurred
                 query: '{__name__=~"pg_settings_.*"} != ON(__name__) {__name__=~"pg_settings_([^t]|t[^r]|tr[^a]|tra[^n]|tran[^s]|trans[^a]|transa[^c]|transac[^t]|transact[^i]|transacti[^o]|transactio[^n]|transaction[^_]|transaction_[^r]|transaction_r[^e]|transaction_re[^a]|transaction_rea[^d]|transaction_read[^_]|transaction_read_[^o]|transaction_read_o[^n]|transaction_read_on[^l]|transaction_read_onl[^y]).*"} OFFSET 5m'
-                severity: warning
+                severity: info
               - name: Postgresql SSL compression active
                 description: Database connections with SSL compression enabled. This may add significant jitter in replication delay. Replicas should turn off SSL compression via `sslcompression=0` in `recovery.conf`.
                 query: 'sum(pg_stat_ssl_compression) > 0'
@@ -647,10 +641,25 @@ groups:
                 query: '((sum (pg_locks_count)) / (pg_settings_max_locks_per_transaction * pg_settings_max_connections)) > 0.20'
                 severity: critical
                 for: 2m
+              - name: Postgresql bloat index high (> 80%)
+                description: 'The index {{ $labels.idxname }} is bloated. You should execute `REINDEX INDEX CONCURRENTLY {{ $labels.idxname }};`'
+                query: 'pg_bloat_btree_bloat_pct > 80 and on (idxname) (pg_bloat_btree_real_size > 100000000)'
+                severity: warning
+                for: 1h
+                comments: |
+                  See https://github.com/samber/awesome-prometheus-alerts/issues/289#issuecomment-1164842737
+              - name: Postgresql bloat table high (> 80%)
+                description: 'The table {{ $labels.relname }} is bloated. You should execute `VACUUM {{ $labels.relname }};`'
+                query: 'pg_bloat_table_bloat_pct > 80 and on (relname) (pg_bloat_table_real_size > 200000000)'
+                severity: warning
+                for: 1h
+                comments: |
+                  See https://github.com/samber/awesome-prometheus-alerts/issues/289#issuecomment-1164842737
 
       - name: SQL Server
         exporters:
           - name: Ozarklake/prometheus-mssql-exporter
+            slug: ozarklake-mssql-exporter
             doc_url: https://github.com/Ozarklake/prometheus-mssql-exporter
             rules:
               - name: SQL Server down
@@ -665,6 +674,7 @@ groups:
       - name: PGBouncer
         exporters:
           - name: spreaker/prometheus-pgbouncer-exporter
+            slug: spreaker-pgbouncer-exporter
             doc_url: https://github.com/spreaker/prometheus-pgbouncer-exporter
             rules:
               - name: PGBouncer active connections
@@ -684,6 +694,7 @@ groups:
       - name: Redis
         exporters:
           - name: oliver006/redis_exporter
+            slug: oliver006-redis-exporter
             doc_url: https://github.com/oliver006/redis_exporter
             rules:
               - name: Redis down
@@ -745,42 +756,48 @@ groups:
       - name: MongoDB
         exporters:
           - name: percona/mongodb_exporter
+            slug: percona-mongodb-exporter
             doc_url: https://github.com/percona/mongodb_exporter
             rules:
               - name: MongoDB Down
                 description: MongoDB instance is down
                 query: 'mongodb_up == 0'
                 severity: critical
+              - name: Mongodb replica member unhealthy
+                description: MongoDB replica member is not healthy
+                query: 'mongodb_rs_members_health == 0'
+                severity: critical
               - name: MongoDB replication lag
                 description: Mongodb replication lag is more than 10s
-                query: 'mongodb_mongod_replset_member_optime_date{state="PRIMARY"} - ON (set) mongodb_mongod_replset_member_optime_date{state="SECONDARY"} > 10'
+                query: 'mongodb_rs_members_optimeDate{member_state="PRIMARY"} - on (set) group_right mongodb_rs_members_optimeDate{member_state="SECONDARY"} > 10'
                 severity: critical
               - name: MongoDB replication headroom
                 description: MongoDB replication headroom is <= 0
-                query: '(avg(mongodb_mongod_replset_oplog_head_timestamp - mongodb_mongod_replset_oplog_tail_timestamp) - (avg(mongodb_mongod_replset_member_optime_date{state="PRIMARY"}) - avg(mongodb_mongod_replset_member_optime_date{state="SECONDARY"}))) <= 0'
+                query: 'sum(avg(mongodb_oplog_stats_start - mongodb_oplog_stats_end)) - sum(avg(mongodb_rs_members_optimeDate{member_state="PRIMARY"} - on (set) group_right mongodb_rs_members_optimeDate{member_state="SECONDARY"})) <= 0'
                 severity: critical
               - name: MongoDB number cursors open
                 description: Too many cursors opened by MongoDB for clients (> 10k)
-                query: 'mongodb_mongod_metrics_cursor_open{state="total"} > 10 * 1000'
+                query: 'mongodb_ss_metrics_cursor_open{csr_type="total"} > 10 * 1000'
                 severity: warning
                 for: 2m
               - name: MongoDB cursors timeouts
                 description: Too many cursors are timing out
-                query: 'increase(mongodb_mongod_metrics_cursor_timed_out_total[1m]) > 100'
+                query: 'increase(mongodb_ss_metrics_cursor_timedOut[1m]) > 100'
                 severity: warning
                 for: 2m
               - name: MongoDB too many connections
                 description: Too many connections (> 80%)
-                query: 'avg by(instance) (rate(mongodb_connections{state="current"}[1m])) / avg by(instance) (sum (mongodb_connections) by (instance)) * 100 > 80'
+                query: 'avg by(instance) (rate(mongodb_ss_connections{conn_type="current"}[1m])) / avg by(instance) (sum (mongodb_ss_connections) by (instance)) * 100 > 80'
                 severity: warning
                 for: 2m
               - name: MongoDB virtual memory usage
                 description: High memory usage
-                query: '(sum(mongodb_memory{type="virtual"}) BY (instance) / sum(mongodb_memory{type="mapped"}) BY (instance)) > 3'
+                query: '(sum(mongodb_ss_mem_virtual) BY (instance) / sum(mongodb_ss_mem_resident) BY (instance)) > 3'
                 severity: warning
                 for: 2m
 
           - name: dcu/mongodb_exporter
+            slug: dcu-mongodb-exporter
             doc_url: https://github.com/dcu/mongodb_exporter
             rules:
               - name: MongoDB replication lag
@@ -828,9 +845,19 @@ groups:
                 severity: warning
                 for: 2m
 
+          - name: stefanprodan/mgob
+            slug: stefanprodan-mgob-exporter
+            doc_url: https://github.com/stefanprodan/mgob
+            rules:
+              - name: Mgob backup failed
+                description: MongoDB backup has failed
+                query: 'changes(mgob_scheduler_backup_total{status="500"}[1h]) > 0'
+                severity: critical
+
       - name: RabbitMQ
         exporters:
           - name: rabbitmq/rabbitmq-prometheus
+            slug: rabbitmq-exporter
             doc_url: https://github.com/rabbitmq/rabbitmq-prometheus
             rules:
               - name: Rabbitmq node down
@@ -878,6 +905,7 @@ groups:
                 for: 2m
 
           - name: kbudde/rabbitmq-exporter
+            slug: kbudde-rabbitmq-exporter
             doc_url: https://github.com/kbudde/rabbitmq_exporter
             rules:
               - name: Rabbitmq down
@@ -945,6 +973,7 @@ groups:
       - name: Elasticsearch
         exporters:
           - name: justwatchcom/elasticsearch_exporter
+            slug: justwatchcom-elasticsearch-exporter
             doc_url: https://github.com/justwatchcom/elasticsearch_exporter
             rules:
               - name: Elasticsearch Heap Usage Too High
@@ -1017,6 +1046,7 @@ groups:
       - name: Cassandra
         exporters:
           - name: instaclustr/cassandra-exporter
+            slug: instaclustr-cassandra-exporter
             doc_url: https://github.com/instaclustr/cassandra-exporter
             rules:
               - name: 'Cassandra Node is unavailable'
@@ -1078,6 +1108,7 @@ groups:
                 severity: critical
 
           - name: criteo/cassandra_exporter
+            slug: criteo-cassandra-exporter
             doc_url: https://github.com/criteo/cassandra_exporter
             rules:
               - name: Cassandra hints count
@@ -1166,9 +1197,11 @@ groups:
       - name: Zookeeper
         exporters:
           - name: cloudflare/kafka_zookeeper_exporter
+            slug: cloudflare-kafka-zookeeper-exporter
             doc_url: https://github.com/cloudflare/kafka_zookeeper_exporter
             rules:
           - name:  dabealu/zookeeper-exporter
+            slug: dabealu-zookeeper-exporter
             doc_url: https://github.com/dabealu/zookeeper-exporter
             rules:
               - name: Zookeeper Down
@@ -1192,6 +1225,7 @@ groups:
       - name: Kafka
         exporters:
           - name: danielqsj/kafka_exporter
+            slug: danielqsj-kafka-exporter
             doc_url: https://github.com/danielqsj/kafka_exporter
             rules:
               - name: Kafka topics replicas
@@ -1204,6 +1238,7 @@ groups:
                 severity: critical
                 for: 1m
           - name: linkedin/Burrow
+            slug: linkedin-kafka-exporter
             doc_url: https://github.com/linkedin/Burrow
             rules:
               - name: Kafka topic offset decreased
@@ -1212,20 +1247,76 @@ groups:
                 severity: warning
               - name: Kafka consumer lag
                 description: Kafka consumer has a 30 minutes and increasing lag
-                query: |
-                  'kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset >= (kafka_burrow_topic_partition_offset offset 15m - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset offset 15m)
-                    AND kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset > 0'
+                query: 'kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset >= (kafka_burrow_topic_partition_offset offset 15m - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset offset 15m) AND kafka_burrow_topic_partition_offset - on(partition, cluster, topic) group_right() kafka_burrow_partition_current_offset > 0'
                 severity: warning
                 for: 15m
+
+      - name: Pulsar
+        exporters:
+          - name: embedded exporter
+            slug: embedded-exporter
+            doc_url: https://pulsar.apache.org/docs/reference-metrics/
+            rules:
+              - name: Pulsar subscription high number of backlog entries
+                description: "The number of subscription backlog entries is over 5k"
+                query: sum(pulsar_subscription_back_log) by (subscription) > 5000
+                for: 1h
+                severity: warning
+              - name: Pulsar subscription very high number of backlog entries
+                description: "The number of subscription backlog entries is over 100k"
+                query: sum(pulsar_subscription_back_log) by (subscription) > 100000
+                for: 1h
+                severity: critical
+              - name: Pulsar topic large backlog storage size
+                description: "The topic backlog storage size is over 5 GB"
+                query: sum(pulsar_storage_size > 5*1024*1024*1024) by (topic)
+                for: 1h
+                severity: warning
+              - name: Pulsar topic very large backlog storage size
+                description: "The topic backlog storage size is over 20 GB"
+                query: sum(pulsar_storage_size > 20*1024*1024*1024) by (topic)
+                for: 1h
+                severity: critical
+              - name: Pulsar high write latency
+                description: "Messages cannot be written in a timely fashion"
+                query: sum(pulsar_storage_write_latency_overflow > 0) by (topic)
+                for: 1h
+                severity: critical
+              - name: Pulsar large message payload
+                description: "Observing large message payload (> 1MB)"
+                query: sum(pulsar_entry_size_overflow > 0) by (topic)
+                for: 1h
+                severity: warning
+              - name: Pulsar high ledger disk usage
+                description: "Observing Ledger Disk Usage (> 75%)"
+                query: sum(bookie_ledger_dir__pulsar_data_bookkeeper_ledgers_usage) by (kubernetes_pod_name) > 75
+                for: 1h
+                severity: critical
+              - name: Pulsar read only bookies
+                description: "Observing Readonly Bookies"
+                query: count(bookie_SERVER_STATUS{} == 0) by (pod)
+                for: 5m
+                severity: critical
+              - name: Pulsar high number of function errors
+                description: "Observing more than 10 Function errors per minute"
+                query: sum((rate(pulsar_function_user_exceptions_total{}[1m]) + rate(pulsar_function_system_exceptions_total{}[1m])) > 10) by (name)
+                for: 1m
+                severity: critical
+              - name: Pulsar high number of sink errors
+                description: "Observing more than 10 Sink errors per minute"
+                query: sum(rate(pulsar_sink_sink_exceptions_total{}[1m]) > 10) by (name)
+                for: 1m
+                severity: critical
 
       - name: Solr
         exporters:
           - name: embedded exporter
+            slug: embedded-exporter
             doc_url: https://solr.apache.org/guide/8_11/monitoring-solr-with-prometheus-and-grafana.html
             rules:
               - name: Solr update errors
                 description: Solr collection {{ $labels.collection }} has failed updates for replica {{ $labels.replica }} on {{ $labels.base_url }}.
-                query: 'increase(solr_metrics_core_update_handler_errors_total) > 1'
+                query: 'increase(solr_metrics_core_update_handler_errors_total[1m]) > 1'
                 severity: critical
               - name: Solr query errors
                 description: Solr has increased query errors in collection {{ $labels.collection }} for replica {{ $labels.replica }} on {{ $labels.base_url }}.
@@ -1245,7 +1336,8 @@ groups:
     services:
       - name: Nginx
         exporters:
-          - name: nginx-lua-prometheus
+          - name: knyar/nginx-lua-prometheus
+            slug: knyar-nginx-exporter
             doc_url: https://github.com/knyar/nginx-lua-prometheus
             rules:
               - name: Nginx high HTTP 4xx error rate
@@ -1267,6 +1359,7 @@ groups:
       - name: Apache
         exporters:
           - name: Lusitaniae/apache_exporter
+            slug: lusitaniae-apache-exporter
             doc_url: https://github.com/Lusitaniae/apache_exporter
             rules:
               - name: Apache down
@@ -1286,6 +1379,7 @@ groups:
       - name: HaProxy
         exporters:
           - name: Embedded exporter (HAProxy >= v2)
+            slug: embedded-exporter-v2
             doc_url: https://github.com/haproxy/haproxy/tree/master/contrib/prometheus-exporter
             rules:
               - name: HAProxy high HTTP 4xx error rate backend
@@ -1334,7 +1428,7 @@ groups:
                 for: 2m
               - name: HAProxy HTTP slowing down
                 description: Average request time is increasing - {{ $value | printf "%.2f"}}
-                query: avg by (proxy) (haproxy_backend_max_total_time_seconds) > 1
+                query: avg by (instance, proxy) (haproxy_backend_max_total_time_seconds) > 1
                 severity: warning
                 for: 1m
               - name: HAProxy retry high
@@ -1357,6 +1451,7 @@ groups:
                 severity: warning
                 for: 1m
           - name: prometheus/haproxy_exporter (HAProxy < v2)
+            slug: haproxy-exporter-v1
             doc_url: https://github.com/prometheus/haproxy_exporter
             rules:
               - name: HAProxy down
@@ -1414,7 +1509,7 @@ groups:
                 for: 1m
               - name: HAProxy retry high
                 description: High rate of retry on {{ $labels.fqdn }}/{{ $labels.backend }} backend
-                query: 'rate(sum by (backend) (haproxy_backend_retry_warnings_total)) > 10'
+                query: 'sum by (backend) (rate(haproxy_backend_retry_warnings_total[1m])) > 10'
                 severity: warning
                 for: 2m
               - name: HAProxy backend down
@@ -1427,18 +1522,19 @@ groups:
                 severity: critical
               - name: HAProxy frontend security blocked requests
                 description: HAProxy is blocking requests for security reason
-                query: 'rate(sum by (frontend) (haproxy_frontend_requests_denied_total)) > 10'
+                query: 'sum by (frontend) (rate(haproxy_frontend_requests_denied_total[2m])) > 10'
                 severity: warning
                 for: 2m
               - name: HAProxy server healthcheck failure
                 description: Some server healthcheck are failing on {{ $labels.server }}
-                query: 'increase(haproxy_server_check_failures_total) > 0'
+                query: 'increase(haproxy_server_check_failures_total[1m]) > 0'
                 severity: warning
                 for: 1m
 
       - name: Traefik
         exporters:
           - name: Embedded exporter v2
+            slug: embedded-exporter-v2
             doc_url: https://docs.traefik.io/observability/metrics/prometheus/
             rules:
               - name: Traefik service down
@@ -1456,6 +1552,7 @@ groups:
                 severity: critical
                 for: 1m
           - name: Embedded exporter v1
+            slug: embedded-exporter-v1
             doc_url: https://docs.traefik.io/observability/metrics/prometheus/
             rules:
               - name: Traefik backend down
@@ -1478,6 +1575,7 @@ groups:
       - name: PHP-FPM
         exporters:
           - name: bakins/php-fpm-exporter
+            slug: bakins-fpm-exporter
             doc_url: https://github.com/bakins/php-fpm-exporter
             rules:
               - name: PHP-FPM max-children reached
@@ -1488,6 +1586,7 @@ groups:
       - name: JVM
         exporters:
           - name: java-client
+            slug: jvm-exporter
             doc_url: https://github.com/prometheus/client_java
             rules:
               - name: JVM memory filling up
@@ -1499,6 +1598,7 @@ groups:
       - name: Sidekiq
         exporters:
           - name: Strech/sidekiq-prometheus-exporter
+            slug: strech-sidekiq-exporter
             doc_url: https://github.com/Strech/sidekiq-prometheus-exporter
             rules:
               - name: Sidekiq queue size
@@ -1517,6 +1617,7 @@ groups:
       - name: Kubernetes
         exporters:
           - name: kube-state-metrics
+            slug: kubestate-exporter
             doc_url: https://github.com/kubernetes/kube-state-metrics/tree/master/docs
             rules:
               - name: Kubernetes Node ready
@@ -1679,6 +1780,7 @@ groups:
       - name: Nomad
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             rules:
               - name: Nomad job failed
                 description: Nomad job failed
@@ -1701,6 +1803,7 @@ groups:
       - name: Consul
         exporters:
           - name: prometheus/consul_exporter
+            slug: consul-exporter
             doc_url: https://github.com/prometheus/consul_exporter
             rules:
               - name: Consul service healthcheck failed
@@ -1719,7 +1822,9 @@ groups:
 
       - name: Etcd
         exporters:
-          - rules:
+          - name: Embedded exporter
+            slug: embedded-exporter
+            rules:
               - name: Etcd insufficient Members
                 description: Etcd cluster should have an odd number of members
                 query: 'count(etcd_server_id) % 2 == 0'
@@ -1786,6 +1891,7 @@ groups:
       - name: Linkerd
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             doc_url: https://linkerd.io/2/tasks/exporting-metrics/
             rules:
               - name: Linkerd high error rate
@@ -1797,6 +1903,7 @@ groups:
       - name: Istio
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             doc_url: https://istio.io/latest/docs/tasks/observability/metrics/querying-metrics/
             rules:
               - name: Istio Kubernetes gateway availability drop
@@ -1836,12 +1943,12 @@ groups:
                 for: 1m
               - name: Istio high request latency
                 description: Istio average requests execution is longer than 100ms.
-                query: 'rate(istio_request_duration_milliseconds_sum[1m]) / rate(istio_request_duration_milliseconds_count[1m]) > 0.1'
+                query: 'rate(istio_request_duration_milliseconds_sum{reporter="destination"}[1m]) / rate(istio_request_duration_milliseconds_count{reporter="destination"}[1m]) > 100'
                 severity: warning
                 for: 1m
               - name: Istio latency 99 percentile
                 description: Istio 1% slowest requests are longer than 1s.
-                query: 'histogram_quantile(0.99, rate(istio_request_duration_milliseconds_bucket[1m])) > 1'
+                query: 'histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket[1m])) by (destination_canonical_service, destination_workload_namespace, source_canonical_service, source_workload_namespace, le)) > 1'
                 severity: warning
                 for: 1m
               - name: Istio Pilot Duplicate Entry
@@ -1854,6 +1961,7 @@ groups:
       - name: Ceph
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             doc_url: https://docs.ceph.com/docs/luminous/mgr/prometheus/
             rules:
               - name: Ceph State
@@ -1919,6 +2027,7 @@ groups:
       - name: SpeedTest
         exporters:
           - name: Speedtest exporter
+            slug: nlamirault-speedtest-exporter
             doc_url: https://github.com/nlamirault/speedtest_exporter
             rules:
               - name: SpeedTest Slow Internet Download
@@ -1933,12 +2042,19 @@ groups:
       - name: ZFS
         exporters:
           - name: node-exporter
+            slug: node-exporter
             doc_url: https://github.com/prometheus/node_exporter
             rules:
+              - name: ZFS offline pool
+                description: 'A ZFS zpool is in a unexpected state: {{ $labels.state }}.'
+                query: 'node_zfs_zpool_state{state!="online"} > 0'
+                severity: critical
+                for: 1m
 
       - name: OpenEBS
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             rules:
               - name: OpenEBS used pool capacity
                 description: 'OpenEBS Pool use more than 80% of his capacity'
@@ -1949,6 +2065,7 @@ groups:
       - name: Minio
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             rules:
               - name: Minio disk offline
                 description: 'Minio disk is offline'
@@ -1962,6 +2079,7 @@ groups:
       - name: SSL/TLS
         exporters:
           - name: ssl_exporter
+            slug: ribbybibby-ssl-exporter
             doc_url: https://github.com/ribbybibby/ssl_exporter
             rules:
               - name: SSL certificate probe failed
@@ -1984,6 +2102,7 @@ groups:
       - name: Juniper
         exporters:
           - name: czerwonk/junos_exporter
+            slug: czerwonk-junos-exporter
             doc_url: https://github.com/czerwonk/junos_exporter
             rules:
               - name: Juniper switch down
@@ -2004,6 +2123,7 @@ groups:
       - name: CoreDNS
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             rules:
               - name: CoreDNS Panic Count
                 description: Number of CoreDNS panics encountered
@@ -2013,6 +2133,7 @@ groups:
       - name: Freeswitch
         exporters:
           - name: znerol/prometheus-freeswitch-exporter
+            slug: znerol-freeswitch-exporter
             doc_url: https://pypi.org/project/prometheus-freeswitch-exporter
             rules:
               - name: Freeswitch down
@@ -2033,6 +2154,7 @@ groups:
       - name: Hashicorp Vault
         exporters:
           - name: Embedded exporter
+            slug: embedded-exporter
             doc_url: https://github.com/hashicorp/vault/blob/master/website/content/docs/configuration/telemetry.mdx#prometheus
             rules:
               - name: Vault sealed
@@ -2054,7 +2176,9 @@ groups:
     services:
       - name: Thanos
         exporters:
-          - rules:
+          - name: Embedded exporter
+            slug: embedded-exporter
+            rules:
               - name: Thanos compaction halted
                 description: Thanos compaction has failed to run and is now halted.
                 query: 'thanos_compact_halted == 1'
@@ -2069,7 +2193,9 @@ groups:
                 severity: critical
       - name: Loki
         exporters:
-          - rules:
+          - name: Embedded exporter
+            slug: embedded-exporter
+            rules:
               - name: Loki process too many restarts
                 description: A loki process had too many restarts (target {{ $labels.instance }})
                 query: changes(process_start_time_seconds{job=~"loki"}[15m]) > 2
@@ -2091,7 +2217,9 @@ groups:
                 for: 5m
       - name: Promtail
         exporters:
-          - rules:
+          - name: Embedded exporter
+            slug: embedded-exporter
+            rules:
               - name: Promtail request errors
                 description: The {{ $labels.job }} {{ $labels.route }} is experiencing {{ printf "%.2f" $value }}% errors.
                 query: '100 * sum(rate(promtail_request_duration_seconds_count{status_code=~"5..|failed"}[1m])) by (namespace, job, route, instance) / sum(rate(promtail_request_duration_seconds_count[1m])) by (namespace, job, route, instance) > 10'
@@ -2104,7 +2232,9 @@ groups:
                 for: 5m
       - name: Cortex
         exporters:
-          - rules:
+          - name: Embedded exporter
+            slug: embedded-exporter
+            rules:
               - name: Cortex ruler configuration reload failure
                 description: Cortex ruler configuration reload failure (instance {{ $labels.instance }})
                 query: cortex_ruler_config_last_reload_successful != 1
@@ -2134,6 +2264,7 @@ groups:
       - name: Jenkins
         exporters:
           - name: Metric plugin
+            slug: metric-plugin
             doc_url: https://plugins.jenkins.io/prometheus/
             rules:
               - name: Jenkins offline
@@ -2144,6 +2275,11 @@ groups:
                 description: "Jenkins healthcheck score: {{$value}}. Healthcheck failure for `{{$labels.instance}}` in realm {{$labels.realm}}/{{$labels.env}} ({{$labels.region}})"
                 query: 'jenkins_health_check_score < 1'
                 severity: critical
+              - name: Jenkins outdated plugins
+                description: "{{ $value }} plugins need update"
+                query: 'sum(jenkins_plugins_withUpdate) by (instance) > 3'
+                severity: warning
+                for: 1d
               - name: Jenkins builds health score
                 description: "Healthcheck failure for `{{$labels.instance}}` in realm {{$labels.realm}}/{{$labels.env}} ({{$labels.region}})"
                 query: 'default_jenkins_builds_health_score < 1'
@@ -2152,7 +2288,7 @@ groups:
                 description: "Job run failures: ({{$value}}) {{$labels.jenkins_job}}. Healthcheck failure for `{{$labels.instance}}` in realm {{$labels.realm}}/{{$labels.env}} ({{$labels.region}})"
                 query: 'delta(jenkins_runs_failure_total[1h]) > 100'
                 severity: warning
-              - name: JenkinsBuildTestsFailing
+              - name: Jenkins build tests failing
                 description: "Last build tests failed: {{$labels.jenkins_job}}. Failed build Tests for job `{{$labels.jenkins_job}}` on {{$labels.instance}}/{{$labels.env}} ({{$labels.region}})"
                 query: 'default_jenkins_builds_last_build_tests_failing > 0'
                 severity: warning
@@ -2167,4 +2303,3 @@ groups:
                   * FAILURE   2 false - The build had a fatal error.
                   * NOT_BUILT 3 false - The module was not built.
                   * ABORTED   4 false - The build was manually aborted.
-
